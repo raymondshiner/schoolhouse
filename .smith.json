@@ -1,0 +1,6 @@
+{
+  "basePort": 5200,
+  "branchPrefix": "smith/",
+  "installer": "npm install",
+  "devCommand": "npm run dev -- --port $SMITH_PORT --strictPort"
+}
