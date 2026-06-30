@@ -32,6 +32,16 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- ---------------------------------------------------------------------------
+-- settings: per-parent preferences (e.g. state-mandated instructional days)
+-- ---------------------------------------------------------------------------
+create table if not exists public.settings (
+  parent_id      uuid primary key references public.profiles (id) on delete cascade,
+  required_days  int not null default 180,
+  school_year    text,
+  updated_at     timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
 -- kids
 -- ---------------------------------------------------------------------------
 create table if not exists public.kids (
@@ -39,20 +49,21 @@ create table if not exists public.kids (
   parent_id   uuid not null references public.profiles (id) on delete cascade,
   name        text not null,
   grade       text,
-  age         int,
+  birthdate   date,            -- age is derived from this (no annual drift)
   created_at  timestamptz not null default now()
 );
 create index if not exists kids_parent_idx on public.kids (parent_id);
 
 -- ---------------------------------------------------------------------------
--- attendance
+-- attendance  (one row per kid per day)
 -- ---------------------------------------------------------------------------
 create table if not exists public.attendance (
   id          uuid primary key default gen_random_uuid(),
   kid_id      uuid not null references public.kids (id) on delete cascade,
   date        date not null,
   status      text not null default 'present'
-                check (status in ('present','absent','half','field_trip')),
+                check (status in ('present','absent','half','field_trip','holiday')),
+  counts_as_school_day boolean not null default true,
   notes       text,
   created_at  timestamptz not null default now(),
   unique (kid_id, date)
@@ -60,31 +71,58 @@ create table if not exists public.attendance (
 create index if not exists attendance_kid_date_idx on public.attendance (kid_id, date);
 
 -- ---------------------------------------------------------------------------
--- loop_items: ordered subjects/work for loop scheduling
+-- loops + loop_items + completions
+-- A kid can run several parallel loops (e.g. "Morning Basket", "Electives").
+-- current_position is the resume pointer — "pick up where we left off".
 -- ---------------------------------------------------------------------------
+create table if not exists public.loops (
+  id                uuid primary key default gen_random_uuid(),
+  kid_id            uuid not null references public.kids (id) on delete cascade,
+  name              text not null default 'Loop',
+  current_position  int not null default 0,
+  created_at        timestamptz not null default now()
+);
+create index if not exists loops_kid_idx on public.loops (kid_id);
+
 create table if not exists public.loop_items (
   id          uuid primary key default gen_random_uuid(),
-  kid_id      uuid not null references public.kids (id) on delete cascade,
+  loop_id     uuid not null references public.loops (id) on delete cascade,
   subject     text not null,
   position    int not null default 0,
   active      boolean not null default true,
   created_at  timestamptz not null default now()
 );
-create index if not exists loop_items_kid_idx on public.loop_items (kid_id, position);
+create index if not exists loop_items_loop_idx on public.loop_items (loop_id, position);
 
--- loop_state: pointer to where each kid left off in their loop
-create table if not exists public.loop_state (
-  kid_id            uuid primary key references public.kids (id) on delete cascade,
-  current_position  int not null default 0,
-  updated_at        timestamptz not null default now()
+create table if not exists public.loop_completions (
+  id            uuid primary key default gen_random_uuid(),
+  loop_item_id  uuid not null references public.loop_items (id) on delete cascade,
+  date          date not null default current_date,
+  created_at    timestamptz not null default now()
 );
+create index if not exists loop_completions_item_idx on public.loop_completions (loop_item_id, date);
 
 -- ---------------------------------------------------------------------------
--- hours_log: for high-school credit accounting
+-- courses + hours_log: high-school credit accounting
+-- A course rolls instructional hours toward a credit target (Carnegie unit,
+-- commonly ~120-180 hrs = 1 credit). hours_log can attach to a course or stand
+-- alone with a free-text subject.
 -- ---------------------------------------------------------------------------
+create table if not exists public.courses (
+  id                  uuid primary key default gen_random_uuid(),
+  kid_id              uuid not null references public.kids (id) on delete cascade,
+  name                text not null,
+  credit_target_hours numeric(6,2) not null default 120,
+  credit_value        numeric(4,2) not null default 1,
+  school_year         text,
+  created_at          timestamptz not null default now()
+);
+create index if not exists courses_kid_idx on public.courses (kid_id);
+
 create table if not exists public.hours_log (
   id          uuid primary key default gen_random_uuid(),
   kid_id      uuid not null references public.kids (id) on delete cascade,
+  course_id   uuid references public.courses (id) on delete set null,
   subject     text,
   date        date not null,
   hours       numeric(5,2) not null check (hours >= 0),
@@ -126,48 +164,96 @@ create table if not exists public.events (
 create index if not exists events_parent_date_idx on public.events (parent_id, date);
 
 -- ===========================================================================
--- Row-Level Security
+-- Ownership helpers (security definer so they can see across RLS to verify)
 -- ===========================================================================
-alter table public.profiles   enable row level security;
-alter table public.kids       enable row level security;
-alter table public.attendance enable row level security;
-alter table public.loop_items enable row level security;
-alter table public.loop_state enable row level security;
-alter table public.hours_log  enable row level security;
-alter table public.books      enable row level security;
-alter table public.events     enable row level security;
-
--- profiles: a parent sees only their own profile
-create policy "own profile" on public.profiles
-  for all using (id = auth.uid()) with check (id = auth.uid());
-
--- kids: scoped directly by parent_id
-create policy "own kids" on public.kids
-  for all using (parent_id = auth.uid()) with check (parent_id = auth.uid());
-
--- Helper: is this kid owned by the current user?
 create or replace function public.owns_kid(k uuid)
-returns boolean
-language sql stable security definer set search_path = public
-as $$
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.kids where id = k and parent_id = auth.uid());
+$$;
+
+create or replace function public.owns_loop(l uuid)
+returns boolean language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from public.kids
-    where id = k and parent_id = auth.uid()
+    select 1 from public.loops lo
+    join public.kids ki on ki.id = lo.kid_id
+    where lo.id = l and ki.parent_id = auth.uid()
   );
 $$;
 
--- child tables: scoped through kid ownership
+create or replace function public.owns_loop_item(i uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.loop_items it
+    join public.loops lo on lo.id = it.loop_id
+    join public.kids ki on ki.id = lo.kid_id
+    where it.id = i and ki.parent_id = auth.uid()
+  );
+$$;
+
+create or replace function public.owns_course(c uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.courses co
+    join public.kids ki on ki.id = co.kid_id
+    where co.id = c and ki.parent_id = auth.uid()
+  );
+$$;
+
+-- ===========================================================================
+-- Row-Level Security
+-- ===========================================================================
+alter table public.profiles        enable row level security;
+alter table public.settings        enable row level security;
+alter table public.kids            enable row level security;
+alter table public.attendance      enable row level security;
+alter table public.loops           enable row level security;
+alter table public.loop_items      enable row level security;
+alter table public.loop_completions enable row level security;
+alter table public.courses         enable row level security;
+alter table public.hours_log       enable row level security;
+alter table public.books           enable row level security;
+alter table public.events          enable row level security;
+
+create policy "own profile" on public.profiles
+  for all using (id = auth.uid()) with check (id = auth.uid());
+
+create policy "own settings" on public.settings
+  for all using (parent_id = auth.uid()) with check (parent_id = auth.uid());
+
+create policy "own kids" on public.kids
+  for all using (parent_id = auth.uid()) with check (parent_id = auth.uid());
+
 create policy "own attendance" on public.attendance
   for all using (public.owns_kid(kid_id)) with check (public.owns_kid(kid_id));
+
+create policy "own loops" on public.loops
+  for all using (public.owns_kid(kid_id)) with check (public.owns_kid(kid_id));
+
 create policy "own loop_items" on public.loop_items
+  for all using (public.owns_loop(loop_id)) with check (public.owns_loop(loop_id));
+
+create policy "own loop_completions" on public.loop_completions
+  for all using (public.owns_loop_item(loop_item_id))
+  with check (public.owns_loop_item(loop_item_id));
+
+create policy "own courses" on public.courses
   for all using (public.owns_kid(kid_id)) with check (public.owns_kid(kid_id));
-create policy "own loop_state" on public.loop_state
-  for all using (public.owns_kid(kid_id)) with check (public.owns_kid(kid_id));
+
+-- hours_log: must own the kid, and the course (when set) must belong to them too
 create policy "own hours_log" on public.hours_log
-  for all using (public.owns_kid(kid_id)) with check (public.owns_kid(kid_id));
+  for all using (public.owns_kid(kid_id))
+  with check (
+    public.owns_kid(kid_id)
+    and (course_id is null or public.owns_course(course_id))
+  );
+
 create policy "own books" on public.books
   for all using (public.owns_kid(kid_id)) with check (public.owns_kid(kid_id));
 
--- events: scoped by parent_id (kid_id optional)
+-- events: own the parent row, and the kid (when set) must belong to them too
 create policy "own events" on public.events
-  for all using (parent_id = auth.uid()) with check (parent_id = auth.uid());
+  for all using (parent_id = auth.uid())
+  with check (
+    parent_id = auth.uid()
+    and (kid_id is null or public.owns_kid(kid_id))
+  );
