@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.tsx'
 import { ThemeProvider } from './components/theme-provider.tsx'
 import { AuthProvider } from './auth/AuthProvider.tsx'
+import { Toaster } from '@/components/ui/sonner'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,6 +19,7 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <App />
+          <Toaster richColors position="top-center" />
         </AuthProvider>
       </QueryClientProvider>
     </ThemeProvider>

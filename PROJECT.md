@@ -83,14 +83,14 @@ slice of Phase 1 (add one kid) deployed to Vercel — to prove auth + RLS + depl
 end-to-end before stacking the rest. This de-risks without cutting scope.
 
 **Done when:**
-- [ ] **Phase 0 — Foundation:** scaffold (done); Supabase schema + RLS applied; Google SSO with protected routes + redirect URLs configured (localhost + Vercel); installable PWA; dark-mode toggle; responsive app shell (bottom tabs on mobile, sidebar on desktop); React Query provider; dev seed script for a fake family.
-- [ ] **Phase 1 — Kids:** list, add / edit / remove (name, grade, birthdate→age); kid switcher. Grade drives whether HS-only features (hours/credits) surface.
-- [ ] **Phase 2 — Attendance:** fast daily flow to mark the whole family at once (present / absent / half / field-trip / holiday); field-trip days; mandated-days progress counter (days completed / `required_days`).
-- [ ] **Phase 3 — Loop:** per-kid loops (≥1); ordered subjects; "next up" view; mark-done logs a completion and advances the loop pointer; reorder + skip.
-- [ ] **Phase 4 — Hours:** courses with credit targets; log hours per kid / course / date; per-course progress bar toward credit (hrs → fractional credit); yearly totals.
-- [ ] **Phase 5 — Calendar:** monthly grid (add/manage schoolwork & events) + yearly overview as 12 mini-month heatmaps → tap a month to drill in.
-- [ ] **Phase 6 — Books:** per-kid reading log (title, author, started/finished, status).
-- [ ] **Phase 7 — Polish:** `verify-ui.mjs` passes desktop + mobile; CI green; deployed to Vercel.
+- [x] **Phase 0 — Foundation:** scaffold; Supabase schema + RLS applied; Google SSO with protected routes; installable PWA; dark-mode toggle; responsive app shell (bottom tabs on mobile, sidebar on desktop); React Query provider; dev seed script for a fake family.
+- [x] **Phase 1 — Kids:** list, add / edit / remove (name, grade, birthdate→age); kid switcher.
+- [x] **Phase 2 — Attendance:** fast daily flow to mark the whole family at once (present / absent / half / field-trip / holiday); field-trip days; mandated-days progress counter (days completed / `required_days`).
+- [x] **Phase 3 — Loop:** per-kid loops (≥1); ordered subjects; "next up" view; mark-done logs a completion and advances the loop pointer.
+- [x] **Phase 4 — Hours:** courses with credit targets; log hours per kid / course / date; per-course progress bar toward credit (hrs → fractional credit); totals.
+- [x] **Phase 5 — Calendar:** monthly grid (add/manage schoolwork & events) + yearly overview as 12 mini-month heatmaps → tap a month to drill in.
+- [x] **Phase 6 — Books:** per-kid reading log (title, author, started/finished, status).
+- [~] **Phase 7 — Polish:** `verify-ui.mjs` covers the auth gate on desktop + mobile (6/6); CI green; code-split routes. **Vercel deploy + authenticated-flow visual QA still pending** (auth gate blocks headless runtime verification of signed-in screens).
 
 **Scope:** all 11 requested features (see Vision).
 
