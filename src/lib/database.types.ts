@@ -14,6 +14,7 @@ export type Kid = {
   name: string
   grade: string | null
   birthdate: string | null
+  google_calendar_id: string | null
   created_at: string
 }
 
@@ -91,6 +92,8 @@ export type SchoolEvent = {
   title: string
   type: EventType
   notes: string | null
+  google_event_id: string | null
+  google_calendar_id: string | null
   created_at: string
 }
 

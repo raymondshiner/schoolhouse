@@ -7,6 +7,9 @@ import {
   MapPin,
   BookOpen,
   CalendarDays,
+  Link2,
+  Unlink,
+  RefreshCw,
 } from 'lucide-react'
 import { format, isSameMonth, isToday, setMonth, startOfYear } from 'date-fns'
 import { toast } from 'sonner'
@@ -16,6 +19,8 @@ import {
   useDeleteEvent,
 } from '@/hooks/useEvents'
 import { useKids } from '@/hooks/useKids'
+import { useGoogleSync, useGoogleMonthEvents } from '@/hooks/useGoogleSync'
+import type { GhostEvent } from '@/lib/google'
 import {
   addMonths,
   monthGridDays,
@@ -43,6 +48,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
 const NONE = '__none__'
@@ -52,13 +63,63 @@ const TYPE_META: Record<EventType, { label: string; dot: string; icon: typeof Ma
   field_trip: { label: 'Field trip', dot: 'bg-amber-500', icon: MapPin },
 }
 
+function GoogleSyncButton() {
+  const { connected, loading, syncing, connect, disconnect, syncNow } =
+    useGoogleSync()
+  if (loading) return null
+  if (!connected)
+    return (
+      <Button variant="outline" size="sm" onClick={connect}>
+        <Link2 className="h-4 w-4" /> Connect Google
+      </Button>
+    )
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} />
+          Google
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onClick={async () => {
+            try {
+              const n = await syncNow()
+              toast.success(
+                n > 0
+                  ? `Synced ${n} event${n === 1 ? '' : 's'} to Google Calendar`
+                  : 'Everything already synced',
+              )
+            } catch (e) {
+              toast.error((e as Error).message)
+            }
+          }}
+        >
+          <RefreshCw className="h-4 w-4" /> Sync now
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={async () => {
+            await disconnect()
+            toast.success('Google Calendar disconnected')
+          }}
+        >
+          <Unlink className="h-4 w-4" /> Disconnect
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function DayDialog({
   day,
   events,
+  ghosts,
   onClose,
 }: {
   day: Date | null
   events: SchoolEvent[]
+  ghosts: GhostEvent[]
   onClose: () => void
 }) {
   const { data: kids = [] } = useKids()
@@ -72,6 +133,7 @@ function DayDialog({
   if (!day) return null
   const iso = toISODate(day)
   const dayEvents = events.filter((e) => e.date === iso)
+  const dayGhosts = ghosts.filter((g) => g.date === iso)
 
   const submit = async () => {
     if (!title.trim()) return toast.error('Give the event a title')
@@ -128,6 +190,23 @@ function DayDialog({
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {dayGhosts.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-muted-foreground text-xs font-medium">
+              On your Google Calendar
+            </p>
+            {dayGhosts.map((g) => (
+              <div
+                key={g.id}
+                className="flex items-center gap-2 rounded-md border border-dashed px-3 py-2"
+              >
+                <span className="border-muted-foreground/60 h-2 w-2 rounded-full border" />
+                <p className="text-muted-foreground text-sm">{g.title}</p>
+              </div>
+            ))}
           </div>
         )}
 
@@ -196,11 +275,13 @@ function MonthView({
   month,
   setMonthDate,
   events,
+  ghosts,
   onDay,
 }: {
   month: Date
   setMonthDate: (d: Date) => void
   events: SchoolEvent[]
+  ghosts: GhostEvent[]
   onDay: (d: Date) => void
 }) {
   const days = monthGridDays(month)
@@ -213,6 +294,15 @@ function MonthView({
     }
     return m
   }, [events])
+  const ghostsByDate = useMemo(() => {
+    const m = new Map<string, GhostEvent[]>()
+    for (const g of ghosts) {
+      const arr = m.get(g.date) ?? []
+      arr.push(g)
+      m.set(g.date, arr)
+    }
+    return m
+  }, [ghosts])
 
   return (
     <div className="space-y-3">
@@ -260,6 +350,8 @@ function MonthView({
         {days.map((day) => {
           const iso = toISODate(day)
           const dayEvents = byDate.get(iso) ?? []
+          const dayGhosts = ghostsByDate.get(iso) ?? []
+          const lineCount = dayEvents.length + dayGhosts.length
           const inMonth = isSameMonth(day, month)
           return (
             <button
@@ -296,9 +388,18 @@ function MonthView({
                     <span className="truncate">{e.title}</span>
                   </span>
                 ))}
-                {dayEvents.length > 2 && (
+                {dayGhosts.slice(0, Math.max(0, 2 - dayEvents.length)).map((g) => (
+                  <span
+                    key={g.id}
+                    className="text-muted-foreground flex items-center gap-1 truncate text-[10px] leading-tight"
+                  >
+                    <span className="border-muted-foreground/60 h-1.5 w-1.5 shrink-0 rounded-full border" />
+                    <span className="truncate">{g.title}</span>
+                  </span>
+                ))}
+                {lineCount > 2 && (
                   <span className="text-muted-foreground text-[10px]">
-                    +{dayEvents.length - 2} more
+                    +{lineCount - 2} more
                   </span>
                 )}
               </div>
@@ -399,12 +500,14 @@ export default function Calendar() {
   const [month, setMonth_] = useState(() => new Date())
   const [year, setYear] = useState(() => new Date().getFullYear())
   const [selectedDay, setSelectedDay] = useState<Date | null>(null)
+  const { data: ghosts = [] } = useGoogleMonthEvents(month)
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Calendar"
         subtitle="Plan and review schoolwork, events, and field trips."
+        action={<GoogleSyncButton />}
       />
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -417,6 +520,7 @@ export default function Calendar() {
             month={month}
             setMonthDate={setMonth_}
             events={events}
+            ghosts={ghosts}
             onDay={setSelectedDay}
           />
         </TabsContent>
@@ -436,6 +540,7 @@ export default function Calendar() {
       <DayDialog
         day={selectedDay}
         events={events}
+        ghosts={ghosts}
         onClose={() => setSelectedDay(null)}
       />
     </div>

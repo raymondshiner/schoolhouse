@@ -102,6 +102,8 @@ export default function Attendance() {
         subtitle="Tap a status for each child. Saves instantly."
       />
 
+      <p className="text-4xl font-bold text-red-500">TEST CHANGE — CAN YOU SEE ME?</p>
+
       <MandatedDays />
 
       <div className="flex items-center justify-between gap-2">
