@@ -225,7 +225,19 @@ function MonthView({
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <p className="font-medium">{format(month, 'MMMM yyyy')}</p>
+        <div className="text-center">
+          <p className="font-medium">{format(month, 'MMMM yyyy')}</p>
+          {!isSameMonth(month, new Date()) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 h-7 text-xs"
+              onClick={() => setMonthDate(new Date())}
+            >
+              Jump to today
+            </Button>
+          )}
+        </div>
         <Button
           variant="outline"
           size="icon"

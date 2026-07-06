@@ -116,12 +116,14 @@ export default function Attendance() {
         <div className="text-center">
           <p className="font-medium">{formatLong(date)}</p>
           {!isToday && (
-            <button
-              className="text-primary text-xs"
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 h-7 text-xs"
               onClick={() => setDate(new Date())}
             >
               Jump to today
-            </button>
+            </Button>
           )}
         </div>
         <Button
