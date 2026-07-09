@@ -27,15 +27,13 @@ create table if not exists public.loop_kids (
 );
 create index if not exists loop_kids_kid_idx on public.loop_kids (kid_id);
 
--- 3. Backfill existing assignments, then drop the old column
+-- 3. Backfill existing assignments
 insert into public.loop_kids (loop_id, kid_id)
   select id, kid_id from public.loops where kid_id is not null
   on conflict do nothing;
 
-drop index if exists public.loops_kid_idx;
-alter table public.loops drop column if exists kid_id;
-
 -- 4. Ownership helpers now flow through parent_id, not the kid
+--    (must precede the column drop — the old policy/functions reference kid_id)
 create or replace function public.owns_loop(l uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
@@ -62,3 +60,7 @@ alter table public.loop_kids enable row level security;
 create policy "own loop_kids" on public.loop_kids
   for all using (public.owns_loop(loop_id))
   with check (public.owns_loop(loop_id) and public.owns_kid(kid_id));
+
+-- 6. Drop the old per-kid column last (policy dependency is gone now)
+drop index if exists public.loops_kid_idx;
+alter table public.loops drop column if exists kid_id;
