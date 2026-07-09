@@ -52,11 +52,12 @@ directly, or through `kid_id → kids.parent_id`). See `supabase/migrations/0001
 ```
 profiles      (id=auth.uid, email)
   ├─ settings            (parent_id, required_days=180, school_year)  ← mandated-days counter
+  ├─ loops               (parent_id, name, current_position)          ← labeled; pointer = "pick up where we left off"
+  │    ├─ loop_kids      (loop_id, kid_id)                            ← any mix of kids: family / subset / solo (0004)
+  │    └─ loop_items     (loop_id, subject, position, active)
+  │         └─ loop_completions(loop_item_id, date)                   ← history feeds reporting
   └─ kids                (id, parent_id, name, grade, birthdate)      ← age derived
        ├─ attendance     (kid_id, date, status[present|absent|half|field_trip|holiday], counts_as_school_day, notes)
-       ├─ loops          (kid_id, name, current_position)             ← parallel loops; pointer = "pick up where we left off"
-       │    └─ loop_items(loop_id, subject, position, active)
-       │         └─ loop_completions(loop_item_id, date)              ← history feeds reporting
        ├─ courses        (kid_id, name, credit_target_hours, credit_value)  ← HS credit
        │    └─ hours_log (kid_id, course_id?, subject, date, hours, description)
        ├─ books          (kid_id, title, author, started_on, finished_on, status)

@@ -30,9 +30,15 @@ export type Attendance = {
 
 export type Loop = {
   id: string
-  kid_id: string
+  parent_id: string
   name: string
   current_position: number
+  created_at: string
+}
+
+export type LoopKid = {
+  loop_id: string
+  kid_id: string
   created_at: string
 }
 

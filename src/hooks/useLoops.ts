@@ -1,17 +1,36 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/auth/AuthProvider'
 import { todayISO } from '@/lib/dates'
 import type { Loop, LoopItem, LoopCompletion } from '@/lib/database.types'
 
-export function useLoops(kidId: string | undefined) {
+export type LoopWithKids = Loop & { loop_kids: { kid_id: string }[] }
+
+/** All of the parent's loops, with their assigned kid ids. */
+export function useLoops() {
+  return useQuery({
+    queryKey: ['loops'],
+    queryFn: async (): Promise<LoopWithKids[]> => {
+      const { data, error } = await supabase
+        .from('loops')
+        .select('*, loop_kids(kid_id)')
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return data
+    },
+  })
+}
+
+/** Loops a specific kid is assigned to (Today's "up next"). */
+export function useLoopsForKid(kidId: string | undefined) {
   return useQuery({
     enabled: !!kidId,
-    queryKey: ['loops', kidId],
+    queryKey: ['loops', 'kid', kidId],
     queryFn: async (): Promise<Loop[]> => {
       const { data, error } = await supabase
         .from('loops')
-        .select('*')
-        .eq('kid_id', kidId!)
+        .select('*, loop_kids!inner(kid_id)')
+        .eq('loop_kids.kid_id', kidId!)
         .order('created_at', { ascending: true })
       if (error) throw error
       return data
@@ -60,24 +79,60 @@ export function useLoopCompletions(loopId: string | undefined) {
 
 export function useCreateLoop() {
   const qc = useQueryClient()
+  const { user } = useAuth()
   return useMutation({
-    mutationFn: async (args: { kid_id: string; name: string }) => {
-      const { error } = await supabase.from('loops').insert(args)
+    mutationFn: async (args: { name: string; kid_ids: string[] }) => {
+      const { data, error } = await supabase
+        .from('loops')
+        .insert({ name: args.name, parent_id: user!.id })
+        .select()
+        .single()
       if (error) throw error
+      if (args.kid_ids.length > 0) {
+        const { error: e2 } = await supabase
+          .from('loop_kids')
+          .insert(args.kid_ids.map((kid_id) => ({ loop_id: data.id, kid_id })))
+        if (e2) throw e2
+      }
     },
-    onSuccess: (_d, v) =>
-      qc.invalidateQueries({ queryKey: ['loops', v.kid_id] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['loops'] }),
   })
 }
 
-export function useDeleteLoop(kidId: string | undefined) {
+/** Rename a loop and/or replace its kid assignments. */
+export function useUpdateLoop() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: { id: string; name: string; kid_ids: string[] }) => {
+      const { error } = await supabase
+        .from('loops')
+        .update({ name: args.name })
+        .eq('id', args.id)
+      if (error) throw error
+      const { error: delErr } = await supabase
+        .from('loop_kids')
+        .delete()
+        .eq('loop_id', args.id)
+      if (delErr) throw delErr
+      if (args.kid_ids.length > 0) {
+        const { error: insErr } = await supabase
+          .from('loop_kids')
+          .insert(args.kid_ids.map((kid_id) => ({ loop_id: args.id, kid_id })))
+        if (insErr) throw insErr
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['loops'] }),
+  })
+}
+
+export function useDeleteLoop() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('loops').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['loops', kidId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['loops'] }),
   })
 }
 
@@ -131,7 +186,7 @@ export function useAdvanceLoop() {
       if (error) throw error
     },
     onSuccess: (_d, v) => {
-      qc.invalidateQueries({ queryKey: ['loops', v.loop.kid_id] })
+      qc.invalidateQueries({ queryKey: ['loops'] })
       qc.invalidateQueries({ queryKey: ['loop_completions', v.loop.id] })
     },
   })

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { useKids } from '@/hooks/useKids'
 import { useAttendanceForDate, useSetAttendance } from '@/hooks/useAttendance'
 import { useEvents } from '@/hooks/useEvents'
-import { useLoops, useLoopItems } from '@/hooks/useLoops'
+import { useLoopsForKid, useLoopItems } from '@/hooks/useLoops'
 import { todayISO } from '@/lib/dates'
 import type { AttendanceStatus, EventType, Kid } from '@/lib/database.types'
 import { PageHeader, EmptyState } from '@/components/ui-bits'
@@ -28,7 +28,7 @@ const TYPE_DOT: Record<EventType, string> = {
 }
 
 function UpNext({ kidId }: { kidId: string }) {
-  const { data: loops = [] } = useLoops(kidId)
+  const { data: loops = [] } = useLoopsForKid(kidId)
   const firstLoop = loops[0]
   const { data: items = [] } = useLoopItems(firstLoop?.id)
   if (!firstLoop) return null

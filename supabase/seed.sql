@@ -9,6 +9,7 @@ declare
   ada uuid;
   leo uuid;
   morning uuid;
+  electives uuid;
   bio uuid;
 begin
   select id into pid from auth.users order by created_at desc limit 1;
@@ -37,14 +38,22 @@ begin
   from (values (ada), (leo)) as k(id),
        generate_series(current_date - 4, current_date, interval '1 day') as d;
 
-  -- A loop for Ada
-  insert into public.loops (kid_id, name, current_position)
-    values (ada, 'Morning Basket', 1) returning id into morning;
+  -- A family loop (both kids) and a solo loop for Ada
+  insert into public.loops (parent_id, name, current_position)
+    values (pid, 'Morning Basket', 1) returning id into morning;
+  insert into public.loop_kids (loop_id, kid_id) values (morning, ada), (morning, leo);
   insert into public.loop_items (loop_id, subject, position) values
     (morning, 'Poetry', 0),
     (morning, 'Nature Study', 1),
     (morning, 'Art', 2),
     (morning, 'Geography', 3);
+
+  insert into public.loops (parent_id, name, current_position)
+    values (pid, 'Ada Electives', 0) returning id into electives;
+  insert into public.loop_kids (loop_id, kid_id) values (electives, ada);
+  insert into public.loop_items (loop_id, subject, position) values
+    (electives, 'Piano', 0),
+    (electives, 'Coding', 1);
 
   -- A high-school course + hours for Leo
   insert into public.courses (kid_id, name, credit_target_hours, credit_value, school_year)

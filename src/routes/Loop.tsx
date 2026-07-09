@@ -1,27 +1,28 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   Check,
+  Pencil,
   Plus,
   Repeat,
   Trash2,
   X,
   ArrowRight,
-  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useActiveKid } from '@/hooks/useActiveKid'
+import { useKids } from '@/hooks/useKids'
 import {
   useLoops,
   useLoopItems,
   useCreateLoop,
+  useUpdateLoop,
   useDeleteLoop,
   useAddLoopItem,
   useDeleteLoopItem,
   useAdvanceLoop,
+  type LoopWithKids,
 } from '@/hooks/useLoops'
-import type { Loop } from '@/lib/database.types'
+import type { Kid } from '@/lib/database.types'
 import { PageHeader, EmptyState } from '@/components/ui-bits'
-import { KidSwitcher } from '@/components/KidSwitcher'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -37,13 +38,138 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 
-function LoopCard({ loop, kidId }: { loop: Loop; kidId: string }) {
+function KidChips({
+  kids,
+  selected,
+  onToggle,
+}: {
+  kids: Kid[]
+  selected: string[]
+  onToggle: (id: string) => void
+}) {
+  if (kids.length === 0)
+    return (
+      <p className="text-muted-foreground text-sm">
+        No kids yet — you can assign them later.
+      </p>
+    )
+  return (
+    <div className="flex flex-wrap gap-2">
+      {kids.map((k) => {
+        const on = selected.includes(k.id)
+        return (
+          <button
+            key={k.id}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onToggle(k.id)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-sm transition-colors',
+              on
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'text-muted-foreground hover:bg-accent',
+            )}
+          >
+            {k.name}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function LoopDialog({
+  trigger,
+  title,
+  submitLabel,
+  initialName = '',
+  initialKidIds = [],
+  pending,
+  onSubmit,
+}: {
+  trigger: ReactNode
+  title: string
+  submitLabel: string
+  initialName?: string
+  initialKidIds?: string[]
+  pending: boolean
+  onSubmit: (name: string, kidIds: string[]) => Promise<void>
+}) {
+  const { data: kids = [] } = useKids()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(initialName)
+  const [kidIds, setKidIds] = useState<string[]>(initialKidIds)
+
+  const reset = () => {
+    setName(initialName)
+    setKidIds(initialKidIds)
+  }
+
+  const toggle = (id: string) =>
+    setKidIds((prev) =>
+      prev.includes(id) ? prev.filter((k) => k !== id) : [...prev, id],
+    )
+
+  const submit = async () => {
+    try {
+      await onSubmit(name.trim() || 'Loop', kidIds)
+      setOpen(false)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o)
+        if (o) reset()
+      }}
+    >
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="loopname">Name</Label>
+            <Input
+              id="loopname"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              placeholder="e.g. Family, Morning Basket"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Kids in this loop</Label>
+            <KidChips kids={kids} selected={kidIds} onToggle={toggle} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={submit} disabled={pending}>
+            {submitLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function LoopCard({ loop, kids }: { loop: LoopWithKids; kids: Kid[] }) {
   const { data: items = [] } = useLoopItems(loop.id)
   const addItem = useAddLoopItem()
   const delItem = useDeleteLoopItem(loop.id)
-  const delLoop = useDeleteLoop(kidId)
+  const delLoop = useDeleteLoop()
+  const update = useUpdateLoop()
   const advance = useAdvanceLoop()
   const [newSubject, setNewSubject] = useState('')
+
+  const assignedIds = loop.loop_kids.map((lk) => lk.kid_id)
+  const assignedKids = kids.filter((k) => assignedIds.includes(k.id))
 
   const activeItems = items.filter((i) => i.active)
   const pos =
@@ -81,19 +207,52 @@ function LoopCard({ loop, kidId }: { loop: Loop; kidId: string }) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">{loop.name}</CardTitle>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Delete loop"
-          onClick={() => {
-            if (confirm(`Delete the "${loop.name}" loop?`))
-              delLoop.mutate(loop.id)
-          }}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+      <CardHeader className="flex flex-row items-start justify-between space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle className="text-base">{loop.name}</CardTitle>
+          <div className="flex flex-wrap gap-1">
+            {assignedKids.length > 0 ? (
+              assignedKids.map((k) => (
+                <Badge key={k.id} variant="secondary" className="font-normal">
+                  {k.name}
+                </Badge>
+              ))
+            ) : (
+              <span className="text-muted-foreground text-xs">
+                No kids assigned
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex">
+          <LoopDialog
+            title="Edit loop"
+            submitLabel="Save"
+            initialName={loop.name}
+            initialKidIds={assignedIds}
+            pending={update.isPending}
+            onSubmit={async (name, kidIds) => {
+              await update.mutateAsync({ id: loop.id, name, kid_ids: kidIds })
+              toast.success(`Updated "${name}"`)
+            }}
+            trigger={
+              <Button variant="ghost" size="icon" aria-label="Edit loop">
+                <Pencil className="h-4 w-4" />
+              </Button>
+            }
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Delete loop"
+            onClick={() => {
+              if (confirm(`Delete the "${loop.name}" loop?`))
+                delLoop.mutate(loop.id)
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {upNext ? (
@@ -154,90 +313,51 @@ function LoopCard({ loop, kidId }: { loop: Loop; kidId: string }) {
   )
 }
 
-function CreateLoopDialog({ kidId }: { kidId: string }) {
-  const create = useCreateLoop()
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const submit = async () => {
-    const n = name.trim() || 'Loop'
-    try {
-      await create.mutateAsync({ kid_id: kidId, name: n })
-      setName('')
-      setOpen(false)
-      toast.success(`Created "${n}"`)
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
-  }
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="h-4 w-4" /> New loop
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New loop</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2">
-          <Label htmlFor="loopname">Name</Label>
-          <Input
-            id="loopname"
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
-            placeholder="e.g. Morning Basket"
-          />
-        </div>
-        <DialogFooter>
-          <Button onClick={submit} disabled={create.isPending}>
-            Create
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 export default function Loop() {
-  const { activeKid, activeKidId, kids } = useActiveKid()
-  const { data: loops = [] } = useLoops(activeKidId)
+  const { data: kids = [] } = useKids()
+  const { data: loops = [] } = useLoops()
+  const create = useCreateLoop()
 
-  if (kids.length === 0) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="Loop" />
-        <EmptyState
-          icon={<Users className="h-8 w-8" />}
-          title="No kids yet"
-          description="Add a child first, then build their loop schedule."
-        />
-      </div>
-    )
-  }
+  const newLoopDialog = (trigger: ReactNode) => (
+    <LoopDialog
+      title="New loop"
+      submitLabel="Create"
+      pending={create.isPending}
+      onSubmit={async (name, kidIds) => {
+        await create.mutateAsync({ name, kid_ids: kidIds })
+        toast.success(`Created "${name}"`)
+      }}
+      trigger={trigger}
+    />
+  )
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Loop"
         subtitle="Pick up right where you left off."
-        action={activeKidId && <CreateLoopDialog kidId={activeKidId} />}
+        action={newLoopDialog(
+          <Button size="sm">
+            <Plus className="h-4 w-4" /> New loop
+          </Button>,
+        )}
       />
-      <KidSwitcher />
 
       {loops.length === 0 ? (
         <EmptyState
           icon={<Repeat className="h-8 w-8" />}
-          title={`No loops for ${activeKid?.name ?? 'this kid'}`}
-          description="A loop is an ordered list of subjects you rotate through — no fixed daily schedule, just do the next one."
-          action={activeKidId && <CreateLoopDialog kidId={activeKidId} />}
+          title="No loops yet"
+          description="A loop is an ordered list of subjects you rotate through — no fixed daily schedule, just do the next one. Assign any mix of kids to each loop: the whole family, a few, or just one."
+          action={newLoopDialog(
+            <Button size="sm">
+              <Plus className="h-4 w-4" /> New loop
+            </Button>,
+          )}
         />
       ) : (
         <div className="space-y-4">
           {loops.map((loop) => (
-            <LoopCard key={loop.id} loop={loop} kidId={activeKidId!} />
+            <LoopCard key={loop.id} loop={loop} kids={kids} />
           ))}
         </div>
       )}
